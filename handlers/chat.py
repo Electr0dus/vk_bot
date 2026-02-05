@@ -31,6 +31,7 @@ async def where_am_i(message: Message, chat: MessagesConversation):
     else:
         await message.answer("Информация о чате не найдена")
 
+
 @chat_labeler.message(text="привет")
 async def hello(message: Message):
     await message.answer("И тебе привет!")

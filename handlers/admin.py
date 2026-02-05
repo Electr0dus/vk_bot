@@ -9,3 +9,5 @@ admin_labeler.auto_rules = [rules.FromPeerRule(118331657)] # ID пользова
 async def halt(_):
     exit(0)
 
+# TODO: Сделать команду для запуска рассылки
+
