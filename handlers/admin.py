@@ -3,7 +3,7 @@ from vkbottle.bot import BotLabeler, Message, rules
 from database import Session, SavedMessage
 from service.send_msg import handle_text_input, handle_photo_input
 import os
-from service.send_msg import user_states, VKGroupSender
+from service.send_msg import user_states, get_all_members, send_message_to_users
 from config import uploader
 from dotenv import load_dotenv
 
@@ -123,7 +123,7 @@ async def delete_message(message: Message, msg_id: str):
         await message.answer(f'✅ Сообщение с ID {msg_id} удалено')
 
 
-@admin_labeler.message(text="/send_user <msg_id>")
+@admin_labeler.message(text="/send_all <msg_id>")
 async def send_user_msg(message: Message, msg_id: str):
     '''
     Отправка сообщения из БД одному пользователю
@@ -147,53 +147,14 @@ async def send_user_msg(message: Message, msg_id: str):
         image_url = saved_msg.image_url
         image_path = saved_msg.image_path
 
-        TOKEN = os.getenv('API_KEY')  # Токен группы
-
-        sender = VKGroupSender(TOKEN)
-
+        members = get_all_members(os.getenv('ID_GROUP'))
+        # members = [118331657, 79966372, 132973839]
         if image_path:
             attachment = await uploader.upload(file_source=image_path)
-            await sender.send_message('118331657', text, attachment=attachment)
+            await send_message_to_users(members, text, attachment=attachment)
             return
 
-        await sender.send_message('118331657', text)
-
-
-@admin_labeler.message(text="/send_all <msg_id>")
-async def send_all_user(message: Message, msg_id: str):
-    '''
-    Запустить рассылку для всех пользователей
-    '''
-    try:
-        msg_id_int = int(msg_id)
-    except ValueError:
-        await message.answer("ID сообщения должен быть числом")
-        return
-    with Session() as session:
-        saved_msg = session.query(SavedMessage).filter_by(id=msg_id_int).first()
-
-        if not saved_msg:
-            await message.answer(f"Сообщение с ID {msg_id} не найдено")
-            return
-
-        msg_id = saved_msg.id
-        created_at = saved_msg.created_at.strftime('%d.%m.%Y %H:%M')
-        user_id = saved_msg.user_id
-        text = saved_msg.text
-        image_url = saved_msg.image_url
-        image_path = saved_msg.image_path
-
-        TOKEN = os.getenv('API_KEY')  # Токен группы
-
-        sender = VKGroupSender(TOKEN)
-        GROUP_ID = os.getenv('ID_GROUP')  # ID группы (только цифры)
-
-        if image_path:
-            attachment = await uploader.upload(file_source=image_path)
-            await sender.broadcast(GROUP_ID, text, attachment=attachment)
-            return
-
-        await sender.broadcast(GROUP_ID, text)
+        await send_message_to_users(members, text)
 
 
 @admin_labeler.message()
