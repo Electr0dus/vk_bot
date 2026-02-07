@@ -11,6 +11,7 @@ class SavedMessage(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer)
+    text = Column(Text)
     image_path = Column(String)
     image_url = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)

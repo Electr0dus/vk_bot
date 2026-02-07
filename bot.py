@@ -10,7 +10,6 @@ format = "%(asctime)s - %(levelname)s - %(funcName)s: %(lineno)d - %(message)s"
 
 logging.basicConfig(handlers=(file_log, console_out), level=logging.INFO, format=format)
 
-
 labeler.load(chat_labeler)
 labeler.load(admin_labeler)
 

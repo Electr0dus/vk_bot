@@ -1,7 +1,11 @@
 from vkbottle import API
 from vkbottle.http import AiohttpClient
+from vkbottle.bot import Message
 import asyncio
-from typing import List
+from typing import List, Optional, Union
+from database import Session, SavedMessage
+from service.down_img import download_image
+
 
 
 class VKGroupSender:
@@ -51,25 +55,67 @@ class VKGroupSender:
 
         return members
 
-    async def send_message(self, user_id: int, message: str) -> bool:
-        """Отправить сообщение пользователю"""
-        try:
-            await self.api.request(
-                "messages.send",
-                {
-                    "user_id": user_id,
-                    "message": message,
-                    "random_id": 0,
-                    "v": "5.199"
-                }
-            )
-            return True
-        except Exception as e:
-            print(f"Ошибка отправки пользователю {user_id}: {e}")
-            return False
+    async def upload_photo(self, photo_path: str) -> Optional[str]:
+        """Загружает фотографию на сервер VK и возвращает attachment строку"""
 
-    async def broadcast(self, group_id: str, message: str, limit: int = None):
-        """Основная функция рассылки"""
+        # Получаем адрес сервера для загрузки
+        upload_server = await self.api.request(
+            "photos.getMessagesUploadServer",
+            {
+                "v": "5.199"
+            }
+        )
+
+        upload_url = upload_server["response"]["upload_url"]
+
+        # Загружаем файл на сервер
+        with open(photo_path, 'rb') as file:
+            files = {'photo': file}
+            async with AiohttpClient() as session:
+                async with session.post(upload_server["response"]["upload_url"], data=files) as response:
+                    upload_result = await response.json()
+
+        # Сохраняем фото на сервере VK
+        save_result = await self.api.request(
+            "photos.saveMessagesPhoto",
+            {
+                "photo": upload_result["photo"],
+                "server": upload_result["server"],
+                "hash": upload_result["hash"],
+                "v": "5.199"
+            }
+        )
+
+        if save_result.get("response"):
+            photo = save_result["response"][0]
+            attachment = f"photo{photo['owner_id']}_{photo['id']}"
+            if 'access_key' in photo:
+                attachment += f"_{photo['access_key']}"
+            return attachment
+        return None
+
+    async def send_message(self, user_id: int, message: str,
+                           attachment: Optional[List[str]] = None) -> bool:
+        """Отправить сообщение пользователю с возможностью прикрепления фото"""
+
+        # Подготавливаем параметры для отправки
+        params = {
+            "user_id": user_id,
+            "message": message,
+            "random_id": 0,
+            "v": "5.199"
+        }
+        # Добавляем вложения, если они есть
+        if attachment:
+            params["attachment"] = attachment
+        await self.api.request("messages.send", params)
+        print(f"Сообщение успешно отправлено пользователю {user_id}")
+        return True
+
+    async def broadcast(self, group_id: str, message: str,
+                       attachment: Optional[List[str]] = None,
+                       limit: int = None):
+        """Основная функция рассылки с поддержкой фотографий"""
 
         # Получаем участников
         members = await self.get_all_members(group_id, limit)
@@ -79,15 +125,29 @@ class VKGroupSender:
             return
 
         print(f"Начинаем рассылку для {len(members)} пользователей...")
+        print(f"Сообщение: {message}")
 
         success = 0
         failed = 0
 
         # Отправляем сообщения
         for i, user_id in enumerate(members):
-            if await self.send_message(user_id, message):
+            try:
+                params = {
+                    "user_id": user_id,
+                    "message": message,
+                    "random_id": 0,
+                    "v": "5.199"
+                }
+
+                # Добавляем вложения, если они есть
+                if attachment:
+                    params["attachment"] = attachment
+
+                await self.api.request("messages.send", params)
                 success += 1
-            else:
+            except Exception as e:
+                print(f"Ошибка отправки пользователю {user_id}: {e}")
                 failed += 1
 
             # Выводим прогресс каждые 10 отправок
@@ -103,9 +163,142 @@ class VKGroupSender:
         print(f"Не удалось: {failed}")
 
 
+user_states = {}
+
+
+async def handle_text_input(message: Message, state: dict, user_id: int):
+    """Обработка ввода текста"""
+    text = message.text or ""
+    if not text.strip():
+        await message.answer("Пожалуйста, отправьте текст сообщения.")
+        return
+
+    state["text"] = text
+    state["awaiting_text"] = False
+    state["awaiting_photo"] = True
+
+    # Если есть вложения, обрабатываем сразу
+    if message.attachments:
+        await save_message_with_photo(message, state, user_id)
+        return
+
+    await message.answer(
+        f"Текст сохранен: {text[:100]}...\n"
+        "Теперь отправьте картинку (или напишите 'без фото')"
+    )
+
+
+async def handle_photo_input(message: Message, state: dict, user_id: int):
+    """Обработка ввода фото"""
+    if message.text and message.text.lower() == 'без фото':
+        await save_message_without_photo(state, user_id, message)
+        return
+
+    if message.attachments:
+        await save_message_with_photo(message, state, user_id)
+        return
+
+    await message.answer("Пожалуйста, отправьте картинку или напишите 'без фото'")
+
+
+async def save_message_with_photo(message: Message, state: dict, user_id: int):
+    """Сохранение сообщения с фото"""
+    photo_url = None
+    image_path = ""
+
+    # Ищем фото во вложениях
+    for attachment in message.attachments:
+        if attachment.photo:
+            photo = attachment.photo
+            sizes = photo.sizes
+            largest = max(sizes, key=lambda s: s.width * s.height)
+            photo_url = largest.url
+            break
+
+    if not photo_url:
+        await message.answer("Не найдено фото во вложениях")
+        return
+
+    # Сохраняем в базу данных
+    with Session() as session:
+        saved_msg = SavedMessage(
+            user_id=user_id,
+            text=state["text"],
+            image_url=photo_url,
+            image_path=""
+        )
+        session.add(saved_msg)
+        session.commit()
+
+        # Получаем ID из БД
+        msg_id = saved_msg.id
+        msg_text = state["text"]
+
+        # Сохраняем локально (опционально)
+        if photo_url:
+            try:
+                filename = f"photo_{msg_id}.jpg"
+                filepath = await download_image(photo_url, filename)
+                if filepath:
+                    saved_msg.image_path = filepath
+                    session.commit()
+            except Exception as e:
+                print(f"Ошибка при сохранении файла: {e}")
+
+    # Удаляем состояние пользователя
+    del user_states[user_id]
+
+    await message.answer(
+        f"✅ Сообщение сохранено!\n"
+        f"ID: {msg_id}\n"
+        f"Текст: {msg_text[:100]}...\n"
+        f"Картинка сохранена"
+    )
+
+
+async def save_message_without_photo(state: dict, user_id: int, message: Message):
+    """Сохранение сообщения без фото"""
+    with Session() as session:
+        saved_msg = SavedMessage(
+            user_id=user_id,
+            text=state["text"]
+        )
+        session.add(saved_msg)
+        session.commit()
+
+        # Получаем данные до закрытия сессии
+        msg_id = saved_msg.id
+        msg_text = state["text"]
+
+    # Удаляем состояние пользователя
+    del user_states[user_id]
+
+    await message.answer(
+        f"✅ Сообщение сохранено без фото!\n"
+        f"ID: {msg_id}\n"
+        f"Текст: {msg_text[:100]}..."
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 from dotenv import load_dotenv
 import os
-
 
 load_dotenv()
 
