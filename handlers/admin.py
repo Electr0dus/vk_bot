@@ -159,6 +159,43 @@ async def send_user_msg(message: Message, msg_id: str):
         await sender.send_message('118331657', text)
 
 
+@admin_labeler.message(text="/send_all <msg_id>")
+async def send_all_user(message: Message, msg_id: str):
+    '''
+    Запустить рассылку для всех пользователей
+    '''
+    try:
+        msg_id_int = int(msg_id)
+    except ValueError:
+        await message.answer("ID сообщения должен быть числом")
+        return
+    with Session() as session:
+        saved_msg = session.query(SavedMessage).filter_by(id=msg_id_int).first()
+
+        if not saved_msg:
+            await message.answer(f"Сообщение с ID {msg_id} не найдено")
+            return
+
+        msg_id = saved_msg.id
+        created_at = saved_msg.created_at.strftime('%d.%m.%Y %H:%M')
+        user_id = saved_msg.user_id
+        text = saved_msg.text
+        image_url = saved_msg.image_url
+        image_path = saved_msg.image_path
+
+        TOKEN = os.getenv('API_KEY')  # Токен группы
+
+        sender = VKGroupSender(TOKEN)
+        GROUP_ID = os.getenv('ID_GROUP')  # ID группы (только цифры)
+
+        if image_path:
+            attachment = await uploader.upload(file_source=image_path)
+            await sender.broadcast(GROUP_ID, text, attachment=attachment)
+            return
+
+        await sender.broadcast(GROUP_ID, text)
+
+
 @admin_labeler.message()
 async def handle_message(message: Message):
     user_id = message.from_id
@@ -173,4 +210,4 @@ async def handle_message(message: Message):
     elif state["awaiting_photo"]:
         await handle_photo_input(message, state, user_id)
 
-# TODO: Сделать команду для запуска рассылки
+# TODO: сделать автоматическую рассылку, когда добавляется новая карточка товара в сообщетсве
