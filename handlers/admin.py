@@ -147,14 +147,15 @@ async def send_user_msg(message: Message, msg_id: str):
         image_url = saved_msg.image_url
         image_path = saved_msg.image_path
 
-        members = get_all_members(os.getenv('ID_GROUP'))
-        # members = [118331657, 79966372, 132973839]
+        # members = await get_all_members(os.getenv('ID_GROUP'))
+        members = [8893813]
         if image_path:
             attachment = await uploader.upload(file_source=image_path)
             await send_message_to_users(members, text, attachment=attachment)
             return
 
         await send_message_to_users(members, text)
+
 
 
 @admin_labeler.message()

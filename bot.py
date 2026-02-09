@@ -1,8 +1,8 @@
 import logging
-from vkbottle import Bot
+from vkbottle import Bot, GroupEventType
 from config import api, state_dispenser, labeler
 from handlers import chat_labeler, admin_labeler
-
+from service.get_market import check_new_products
 
 file_log = logging.FileHandler("vkbot.log")
 console_out = logging.StreamHandler()
@@ -20,5 +20,6 @@ bot = Bot(
     state_dispenser=state_dispenser,
 )
 
+bot.loop_wrapper.add_task(check_new_products())
 
 bot.run_forever()
