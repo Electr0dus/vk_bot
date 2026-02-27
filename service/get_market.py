@@ -1,6 +1,6 @@
 import asyncio
 from config import API, uploader
-from service.send_msg import send_message_to_users
+from service.send_msg import send_message_to_users, get_all_members
 from service.down_img import download_image
 
 from dotenv import load_dotenv
@@ -34,20 +34,14 @@ async def check_new_products():
                 msg += (newest.description + '\n')
                 msg += f'{int(newest.price.amount)/100} {newest.price.currency.name}\n'
                 msg += f'https://vk.com/market-{GROUP_ID}?w=product-{GROUP_ID}_{newest.id}'
+                all_users: list = await get_all_members(os.getenv('ID_GROUP'))
                 if newest.thumb_photo:
                     filepath = await download_image(newest.thumb_photo, f'photo_{newest.id}.jpg')
                     attachment = await uploader.upload(file_source=filepath)
-                    await send_message_to_users([118331657], msg, attachment)
+                    await send_message_to_users(all_users, msg, attachment)
                     os.remove(filepath)
                 else:
-                    await send_message_to_users([118331657], msg)
-                # print("Новый товар найден!")
-                # print(newest.title)
-                # print(newest.description)
-                # print(int(newest.price.amount)/100, newest.price.currency.name)
-                # print(f"https://vk.com/market-{GROUP_ID}?w=product-{GROUP_ID}_{newest.id}")
+                    await send_message_to_users(all_users, msg)
 
                 last_know_item_id = newest.id
-            # TODO: сделать рассылку пользователям в чат при получении нового товара, для начала сформирвоать красивую строку, чтобы было красиво, возможно научиться получать картинку товаора
-            # чтоыб вместе с картинкой отправлять пользователю сообщение
         await asyncio.sleep(30)
